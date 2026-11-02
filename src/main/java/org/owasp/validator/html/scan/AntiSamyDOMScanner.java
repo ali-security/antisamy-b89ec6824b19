@@ -211,6 +211,7 @@ public class AntiSamyDOMScanner extends AbstractAntiSamyScanner {
 
         parser.setFeature("http://cyberneko.org/html/features/scanner/style/strip-cdata-delims", false);
         parser.setFeature("http://cyberneko.org/html/features/scanner/cdata-sections", true);
+        parser.setFeature("http://cyberneko.org/html/features/parse-noscript-content", false);
 
         try {
             parser.setFeature("http://cyberneko.org/html/features/enforce-strict-attribute-names", true);
@@ -701,8 +702,20 @@ public class AntiSamyDOMScanner extends AbstractAntiSamyScanner {
         node.getParentNode().removeChild(node);
     }
 
+    /*
+     * Elements whose content browsers parse as raw text (or escapable raw text).
+     * Comments inside them are not comments for a browser, so preserving them would
+     * let a fake "-->" smuggle markup out of the element (mutation XSS, CVE-2023-43643).
+     */
+    private static final java.util.Set<String> RAW_TEXT_ELEMENTS = new java.util.HashSet<String>(
+            java.util.Arrays.asList("textarea", "title", "xmp", "noscript", "noembed", "noframes",
+                    "iframe", "plaintext", "script", "style"));
+
     private void processCommentNode(Node node) {
-        if (!policy.isPreserveComments()) {
+        Node parent = node.getParentNode();
+        if (!policy.isPreserveComments()
+                || (parent != null && parent.getNodeType() == Node.ELEMENT_NODE
+                    && RAW_TEXT_ELEMENTS.contains(parent.getNodeName().toLowerCase()))) {
             node.getParentNode().removeChild(node);
         } else {
             String value = ((Comment) node).getData();

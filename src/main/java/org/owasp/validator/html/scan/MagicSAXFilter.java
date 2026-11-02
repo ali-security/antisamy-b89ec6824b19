@@ -69,6 +69,12 @@ public class MagicSAXFilter extends DefaultFilter implements XMLDocumentFilter {
 	private boolean isNofollowAnchors;
 	private boolean isValidateParamAsEmbed;
 	private boolean inCdata = false;
+	// Depth of currently open raw-text elements (textarea, xmp, noscript, ...). Comments inside
+	// them are text for a browser, so they must never be preserved (mutation XSS, CVE-2023-43643).
+	private int rawTextDepth = 0;
+	private static final Set<String> RAW_TEXT_ELEMENTS = new HashSet<String>(
+			Arrays.asList("textarea", "title", "xmp", "noscript", "noembed", "noframes",
+					"iframe", "plaintext", "script", "style"));
     // From policy
     private boolean preserveComments;
     private int maxInputSize;
@@ -91,6 +97,7 @@ public class MagicSAXFilter extends DefaultFilter implements XMLDocumentFilter {
         cssAttributes = null;
         cssScanner = null;
         inCdata = false;
+        rawTextDepth = 0;
 
     }
 
@@ -119,7 +126,7 @@ public class MagicSAXFilter extends DefaultFilter implements XMLDocumentFilter {
 
     public void comment(XMLString text, Augmentations augs) throws XNIException {
 
-		if (preserveComments) {
+		if (preserveComments && rawTextDepth == 0) {
 			String value = text.toString();
 			// Strip conditional directives regardless of the
 			// PRESERVE_COMMENTS setting.
@@ -148,6 +155,9 @@ public class MagicSAXFilter extends DefaultFilter implements XMLDocumentFilter {
     }
 
 	public void endElement(QName element, Augmentations augs) throws XNIException {
+        if (rawTextDepth > 0 && RAW_TEXT_ELEMENTS.contains(element.localpart.toLowerCase())) {
+            rawTextDepth--;
+        }
         Ops topOp = peekTop();
         if (Ops.REMOVE == topOp) {
 			// content is removed altogether
@@ -232,6 +242,9 @@ public class MagicSAXFilter extends DefaultFilter implements XMLDocumentFilter {
 	public void startElement(QName element, XMLAttributes attributes, Augmentations augs) throws XNIException {
 		// see if we have a policy for this tag.
         String tagNameLowerCase = element.localpart.toLowerCase();
+        if (RAW_TEXT_ELEMENTS.contains(tagNameLowerCase)) {
+            rawTextDepth++;
+        }
         Tag tag = policy.getTagByLowercaseName(tagNameLowerCase);
 
 		/*
