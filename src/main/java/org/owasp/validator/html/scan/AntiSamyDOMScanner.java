@@ -68,6 +68,13 @@ public class AntiSamyDOMScanner extends AbstractAntiSamyScanner {
             Pattern.compile("[\\u0000-\\u001F\\uD800-\\uDFFF\\uFFFE-\\uFFFF&&[^\\u0009\\u000A\\u000D]]");
     private static final Pattern conditionalDirectives =
             Pattern.compile("<?!?\\[\\s*(?:end)?if[^]]*\\]>?");
+    /*
+     * Comment text that a browser would close early once re-emitted as "<!--text-->": text
+     * starting with ">" or "->" (abrupt "<!-->" / "<!--->") or containing "-->" or "--!>".
+     * NekoHTML only ends a comment at "-->", so preserving such text would let the markup
+     * after it escape the comment (mutation XSS, CVE-2024-23635).
+     */
+    private static final Pattern unsafeCommentText = Pattern.compile("^-?>|--!?>");
 
     private static final Queue<CachedItem> cachedItems = new ConcurrentLinkedQueue<CachedItem>();
 
@@ -722,7 +729,13 @@ public class AntiSamyDOMScanner extends AbstractAntiSamyScanner {
             // Strip conditional directives regardless of the
             // PRESERVE_COMMENTS setting.
             if (value != null) {
-                ((Comment) node).setData(conditionalDirectives.matcher(value).replaceAll(""));
+                value = conditionalDirectives.matcher(value).replaceAll("");
+                if (unsafeCommentText.matcher(value).find()) {
+                    // A browser would end this comment early, so it cannot be preserved.
+                    node.getParentNode().removeChild(node);
+                } else {
+                    ((Comment) node).setData(value);
+                }
             }
         }
     }

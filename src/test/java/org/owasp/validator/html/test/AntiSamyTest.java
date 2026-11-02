@@ -1442,4 +1442,44 @@ static final String test33 = "<html>\n"
             assertThat(as.scan(payload, revised, AntiSamy.SAX).getCleanHTML(), not(containsString("mxss")));
         }
     }
+
+    @Test
+    public void testBangCommentsWhenPreservingComments() throws ScanException, PolicyException {
+        // Concern is that when preserving comments, certain endings of comments would be
+        // misinterpreted.
+        TestPolicy revised = policy.cloneWithDirective(Policy.PRESERVE_COMMENTS, "true");
+        assertThat(as.scan("<!--<div/>--!><img src=x onerror=mxss(1)> <li>--></p>", revised, AntiSamy.DOM).getCleanHTML(),
+                not(containsString("mxss")));
+        assertThat(as.scan("<!--<div/>--!><img src=x onerror=mxss(1)> <li>--></p>", revised, AntiSamy.SAX).getCleanHTML(),
+                not(containsString("mxss")));
+        assertThat(as.scan("<!--<div/>--><img src=x onerror=mxss(1)> <li>--></p><input/>", revised, AntiSamy.DOM).getCleanHTML(),
+                not(containsString("mxss")));
+        assertThat(as.scan("<!--<div/>--><img src=x onerror=mxss(1)> <li>--></p><input/>", revised, AntiSamy.SAX).getCleanHTML(),
+                not(containsString("mxss")));
+    }
+
+    @Test
+    public void testAbruptCommentEndingsWhenPreservingComments() throws ScanException, PolicyException {
+        // Browsers also close a comment at "<!-->", "<!--->" and a nested "<!--!>", which NekoHTML
+        // keeps as comment text. Such comments must not be preserved either, or the markup after
+        // them would become live once the output is rendered.
+        TestPolicy revised = policy.cloneWithDirective(Policy.PRESERVE_COMMENTS, "true");
+        String[] payloads = {
+            "<!--><img src=x onerror=mxss(1)>-->",
+            "<!---><img src=x onerror=mxss(1)>-->",
+            "<!--<!--!><img src=x onerror=mxss(1)>-->",
+            "<p>text<!--a--!><img src=x onerror=mxss(1)>--></p>"
+        };
+
+        for (String payload : payloads) {
+            assertThat(as.scan(payload, revised, AntiSamy.DOM).getCleanHTML(), not(containsString("mxss")));
+            assertThat(as.scan(payload, revised, AntiSamy.SAX).getCleanHTML(), not(containsString("mxss")));
+        }
+
+        // Well-formed comments, even ones holding a bare "--", are still preserved.
+        assertThat(as.scan("<p>text<!-- a -- b --></p>", revised, AntiSamy.DOM).getCleanHTML(),
+                containsString("<!-- a -- b -->"));
+        assertThat(as.scan("<p>text<!-- a -- b --></p>", revised, AntiSamy.SAX).getCleanHTML(),
+                containsString("<!-- a -- b -->"));
+    }
 }

@@ -123,6 +123,13 @@ public class MagicSAXFilter extends DefaultFilter implements XMLDocumentFilter {
 
     private static final Pattern conditionalDirectives =
             Pattern.compile("<?!?\\[\\s*(?:end)?if[^]]*\\]>?");
+    /*
+     * Comment text that a browser would close early once re-emitted as "<!--text-->": text
+     * starting with ">" or "->" (abrupt "<!-->" / "<!--->") or containing "-->" or "--!>".
+     * NekoHTML only ends a comment at "-->", so preserving such text would let the markup
+     * after it escape the comment (mutation XSS, CVE-2024-23635).
+     */
+    private static final Pattern unsafeCommentText = Pattern.compile("^-?>|--!?>");
 
     public void comment(XMLString text, Augmentations augs) throws XNIException {
 
@@ -132,7 +139,10 @@ public class MagicSAXFilter extends DefaultFilter implements XMLDocumentFilter {
 			// PRESERVE_COMMENTS setting.
 			if (value != null) {
                 value = conditionalDirectives.matcher(value).replaceAll("");
-				super.comment(new XMLString(value.toCharArray(), 0, value.length()), augs);
+                // A browser would end this comment early, so it cannot be preserved.
+                if (!unsafeCommentText.matcher(value).find()) {
+                    super.comment(new XMLString(value.toCharArray(), 0, value.length()), augs);
+                }
 			}
 		}
 	}
